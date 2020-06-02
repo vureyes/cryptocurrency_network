@@ -44,3 +44,9 @@
  
  - Mensaje enviado para publicar un nuevo bloque del Blockchain en la red
  - Contiene el nuevo bloque que se quiere agragar a la nueva versón del Blockchain
+
+
+## Comandos
+ - __c \<_host_> \<_port_>__ : Conectar con un nodo de la red identificado por el par (_host_, _port_)
+ - __t \<_value_>__ : Crear una nueva transaccion con el valor _value_
+ - __b__ : Crear un nuevo bloque
