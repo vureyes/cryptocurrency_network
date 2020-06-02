@@ -1,11 +1,13 @@
 import asyncio
 from aioconsole import ainput
 
+
 class Connection:
     def __init__(self, reader, writer):
         self.reader = reader
         self.writer = writer
         self.address = writer.get_extra_info('peername')
+
 
 class Node:
     def __init__(self, host, port):
@@ -22,7 +24,6 @@ class Node:
 
         self.sync_lock = False
         self.last_message = ''
-
 
     def run(self):
         # Obtener el loop de funciones asincornas
@@ -84,13 +85,13 @@ class Node:
         reader, writer = await asyncio.open_connection(host, port)
         # self.connections.append(Connection(reader,writer))
         loop = asyncio.get_event_loop()
-        task = loop.create_task(self.handle_connection(reader,writer))
+        task = loop.create_task(self.handle_connection(reader, writer))
         while True:
             message = await ainput("msg> ") # Input que no bloquea el resto de la ejecucion
             if message == 'show':
                 print(f'MSG: {self.last_message!r}')
             else:
-                await self.spread_message(message,None)
+                await self.spread_message(message, None)
 
             # data = await reader.read(100)
             # print(f'Received: {data.decode()!r}')
