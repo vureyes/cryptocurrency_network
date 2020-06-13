@@ -55,15 +55,10 @@ class Node:
         # It never ends
         loop.run_forever()
 
-    def set_reference(self, host, port):  # Setea los datos del nodo al que se va a conectar / Delete
-        self.ref_host = host
-        self.ref_port = port
-
     def save_connection(self, reader, writer):  # Genera el objeto de conexion para cada nodo conectado
-        new_connection = Connection(reader, writer)
-        self.connections.append(new_connection)
-        node_print(f'Connected to {new_connection.address!r}')
-        new_connection.writer.write(self.send_version())
+        conn = Connection(reader, writer)
+        self.connections.append(conn)
+        node_print(f'Connected to {conn.address!r}')
 
     async def spread_message(self, msg, addr):
         node_print(f"Spread: {msg!r}")
@@ -74,13 +69,18 @@ class Node:
                 conn.writer.write(msg.encode())
                 await conn.writer.drain()
 
-    async def spread_signal(self, msg, addr):
+    async def spread_signal(self, msg, excluded_addr=None):
         for conn in self.connections:
-            # node_print(f"Trying to spread to {conn.address!r}")
-            if conn.address != addr:
-                # node_print(f"Spreading to {conn.address!r}")
+            if conn.address != excluded_addr:
                 conn.writer.write(msg)
                 await conn.writer.drain()
+
+    async def send_signal(self, msg, addr):
+        for conn in self.connections:
+            if conn.address == addr:
+                conn.writer.write(msg)
+                await conn.writer.drain()
+                break
 
     async def server_init(self, host, port):  # Inicia el servidor que acepta conexiones de nuevos nodos
         # Se inicia el servidor en la direccion (host,port)
@@ -101,7 +101,7 @@ class Node:
             message = data.decode()
             if message == "":
                 break
-            await self.read_command(data)
+            await self.read_command(data, addr)
             # Enviar mensaje a todos los otros nodos que estan conectados
             # await self.spread_message(message, addr)
 
@@ -112,6 +112,8 @@ class Node:
         reader, writer = await asyncio.open_connection(host, port)
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.handle_connection(reader, writer))
+        writer.write(self.send_version())
+
     
     async def prompt_init(self):
         while True:
@@ -120,9 +122,10 @@ class Node:
             if cmd[0] == 'show':
                 print(f'MSG: {self.last_message!r}')
             elif cmd[0] == 's':
-                print(self.version)
-                print(self.block_chain)
-                print(self.tx_pool)
+                self.show()
+                # print(self.version)
+                # print(self.block_chain)
+                # print(self.tx_pool)
             elif cmd[0] == 'c':
                 if len(cmd) == 3:
                     host = cmd[1]
@@ -141,67 +144,71 @@ class Node:
             else:
                 await self.spread_message(prompt, None)
 
-    async def read_command(self, encode_message):
-        print(encode_message)
+    async def read_command(self, encode_message, addr):
         message = self.decode(encode_message)
+        node_print(str(message))
         if 'command' not in message.keys():
             return
         command = message['command']
         payload = message['payload']
         # print(message)
         if command == 0x00:
-            await self.compare_version(payload)
+            await self.compare_version(payload, addr)
             return
         if command == 0x01:
-            await self.spread_signal(self.complete_hashes(payload), None)
+            await self.send_signal(self.complete_hashes(payload), addr)
             return
         if command == 0x02:
-            await self.complete_block_chain(payload)
+            await self.complete_block_chain(payload, addr)
             return
         if command == 0x03:
-            await self.spread_signal(self.send_data(payload), None)
+            await self.send_signal(self.send_data(payload), addr)
             return
         if command == 0x04:
-            await self.add_block(payload)
+            await self.add_block(payload, addr)
             return
         if command == 0x05:
-            self.add_new_tx(payload)
+            node_print("New tx recieved")
+            await self.spread_signal(self.add_new_tx(payload), excluded_addr=addr)
             return
         if command == 0x06:
-            self.add_new_block(payload)
+            node_print("New block recieved")
+            await self.spread_signal(self.add_new_block(payload), excluded_addr=addr)
             return
 
     # Logic functions for commands
-    async def compare_version(self, version):
-        if version <= self.version:
-            return
+    async def compare_version(self, version, addr):
+        if version < self.version:
+            await self.send_signal(self.send_version(),addr)
+        elif version == self.version:
+            return 
         else:
-            await self.spread_signal(self.send_hashes(), None)
+            await self.send_signal(self.send_hashes(), addr)
 
-    async def complete_block_chain(self, miss_hashes):
+    async def complete_block_chain(self, miss_hashes, addr):
         if len(miss_hashes) > 0:
             self.miss_hashes = miss_hashes
             next_hash = self.miss_hashes.pop(0)
-            await self.spread_signal(self.get_data(next_hash), None)
+            await self.send_signal(self.get_data(next_hash), addr)
         return
 
-    async def add_block(self, block):
+    async def add_block(self, block, addr):
         self.block_chain.append(block)
         self.version = len(self.block_chain)
         if len(self.miss_hashes) > 0:
             next_hash = self.miss_hashes.pop(0)
-            await self.spread_signal(self.get_data(next_hash), None)
+            await self.send_signal(self.get_data(next_hash), addr)
         return
 
     def add_new_tx(self, tx):
         self.tx_pool.append(tx)
-        return
+        return self.create_msg(0x05, tx)
 
     def add_new_block(self, block):
         self.block_chain.append(block)
         self.tx_pool = []
         self.version = len(self.block_chain)
-        return
+        return self.create_msg(0x06, block)
 
     # Set messages types
     def send_version(self):
@@ -272,6 +279,15 @@ class Node:
     def create_msg(self, command, payload):
         message = {'command': command, 'payload': payload}
         return self.encode(message)
+
+    def show(self):
+        node_print(f"version:{self.version}")
+        node_print("Blockchain:")
+        for block in self.block_chain:
+            node_print(str(block))
+        node_print("Transaction pool:")
+        for tx in self.tx_pool:
+            node_print(str(tx))
 
     # Function for bytes communication
     @staticmethod
