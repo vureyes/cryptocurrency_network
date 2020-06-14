@@ -2,6 +2,7 @@ import sys
 import asyncio
 import json
 import hashlib
+import time
 from aioconsole import ainput
 
 
@@ -113,7 +114,6 @@ class Node:
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.handle_connection(reader, writer))
         writer.write(self.send_version())
-
     
     async def prompt_init(self):
         while True:
@@ -168,12 +168,16 @@ class Node:
             await self.add_block(payload, addr)
             return
         if command == 0x05:
-            node_print("New tx recieved")
-            await self.spread_signal(self.add_new_tx(payload), excluded_addr=addr)
+            verify_tx = list(filter(lambda tx: tx['id'] == payload['id'], self.tx_pool))
+            if len(verify_tx) == 0:
+                node_print("New tx recieved")
+                await self.spread_signal(self.add_new_tx(payload), excluded_addr=addr)
             return
         if command == 0x06:
-            node_print("New block recieved")
-            await self.spread_signal(self.add_new_block(payload), excluded_addr=addr)
+            verify_block = list(filter(lambda block: hash_256(block) == hash_256(payload), self.block_chain))
+            if len(verify_block) == 0:
+                node_print("New block recieved")
+                await self.spread_signal(self.add_new_block(payload), excluded_addr=addr)
             return
 
     # Logic functions for commands
@@ -241,6 +245,7 @@ class Node:
         tx = {
             'type': 'transaction',
             'id': '',
+            'time': time.time(),
             'value': value
         }
         tx['id'] = hash_256(tx)
