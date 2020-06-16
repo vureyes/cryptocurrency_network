@@ -18,7 +18,7 @@ class Connection:
 
 
 def node_print(msg):  # Beauty printing
-    print("\r"+msg + "\n<:3)~ ", end="")
+    print("\r"+msg + "\nnode>> ", end="")
 
 
 class Node:
@@ -46,6 +46,12 @@ class Node:
         self.sync_lock = False
         self.last_message = ''
 
+    '''
+    ##############################################
+        Connection handling
+    ##############################################
+    '''
+
     def run(self):
         # Obtener el loop de funciones asincornas
         loop = asyncio.get_event_loop()
@@ -60,15 +66,6 @@ class Node:
         conn = Connection(reader, writer)
         self.connections.append(conn)
         node_print(f'Connected to {conn.address!r}')
-
-    async def spread_message(self, msg, addr):
-        node_print(f"Spread: {msg!r}")
-        for conn in self.connections:
-            node_print(f"Trying to spread to {conn.address!r}")
-            if conn.address != addr:
-                node_print(f"Spreading to {conn.address!r}")
-                conn.writer.write(msg.encode())
-                await conn.writer.drain()
 
     async def spread_signal(self, msg, excluded_addr=None):
         for conn in self.connections:
@@ -103,8 +100,6 @@ class Node:
             if message == "":
                 break
             await self.read_command(data, addr)
-            # Enviar mensaje a todos los otros nodos que estan conectados
-            # await self.spread_message(message, addr)
 
         node_print(f"Closed connection from {addr!r}")
         writer.close()
@@ -114,18 +109,21 @@ class Node:
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.handle_connection(reader, writer))
         writer.write(self.send_version())
+
+    '''
+    ##################################################
+        Behaviour and Interaction
+    ##################################################
+    '''
     
     async def prompt_init(self):
         while True:
-            prompt = await ainput("\r<:3)~ ")  # Input que no bloquea el resto de la ejecucion
+            prompt = await ainput("\rnode>> ")  # Input que no bloquea el resto de la ejecucion
             cmd = prompt.strip().split(' ')
             if cmd[0] == 'show':
                 print(f'MSG: {self.last_message!r}')
             elif cmd[0] == 's':
                 self.show()
-                # print(self.version)
-                # print(self.block_chain)
-                # print(self.tx_pool)
             elif cmd[0] == 'c':
                 if len(cmd) == 3:
                     host = cmd[1]
@@ -141,8 +139,6 @@ class Node:
             elif cmd[0] == 'b':
                 await self.spread_signal(self.create_block(), None)
                 print("Creating block")
-            else:
-                await self.spread_message(prompt, None)
 
     async def read_command(self, encode_message, addr):
         message = self.decode(encode_message)
@@ -151,7 +147,6 @@ class Node:
             return
         command = message['command']
         payload = message['payload']
-        # print(message)
         if command == 0x00:
             await self.compare_version(payload, addr)
             return
@@ -180,7 +175,12 @@ class Node:
                 await self.spread_signal(self.add_new_block(payload), excluded_addr=addr)
             return
 
-    # Logic functions for commands
+
+    '''
+    ############################################
+        Logic functions for commands
+    ############################################
+    '''
     async def compare_version(self, version, addr):
         if version < self.version:
             await self.send_signal(self.send_version(),addr)
@@ -280,7 +280,12 @@ class Node:
                 print('True')
             first_block = block
 
-    # Message Format
+
+    '''
+    ###################################################
+        Message Format
+    ###################################################
+    '''
     def create_msg(self, command, payload):
         message = {'command': command, 'payload': payload}
         return self.encode(message)
